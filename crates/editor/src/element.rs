@@ -45,13 +45,13 @@ use gpui::{
     Action, Along, AnyElement, App, AppContext, AvailableSpace, Axis as ScrollbarAxis, BorderStyle,
     Bounds, ClickEvent, ClipboardItem, ContentMask, Context, Corner, Corners, CursorStyle,
     DispatchPhase, Edges, Element, ElementInputHandler, Entity, Focusable as _, FontId,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, IsZero,
-    KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, ScrollDelta,
-    ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Size, StatefulInteractiveElement,
-    Style, Styled, TextRun, TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill,
-    linear_color_stop, linear_gradient, outline, point, px, quad, relative, size, solid_background,
-    transparent_black,
+    GlobalElementId, GlyphKind, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement,
+    IsZero, KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement,
+    Pixels, ScrollDelta, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Size,
+    StatefulInteractiveElement, Style, Styled, TextRun, TextStyleRefinement, WeakEntity, Window,
+    anchored, deferred, div, fill, linear_color_stop, linear_gradient, outline, point, px, quad,
+    relative, size, solid_background, transparent_black,
 };
 use itertools::Itertools;
 use language::{IndentGuideSettings, language_settings::ShowWhitespaceSetting};
@@ -1978,16 +1978,22 @@ impl EditorElement {
         )
         .with_thumb_state(thumb_state);
 
+        const MINIMAP_SCROLL_EPSILON: f64 = 0.01;
         minimap_editor.update(cx, |editor, cx| {
-            editor.set_scroll_position(point(0., minimap_scroll_top), window, cx)
+            let current = editor.scroll_position(cx);
+            if (current.y - minimap_scroll_top).abs() > MINIMAP_SCROLL_EPSILON || current.x != 0.0 {
+                editor.set_scroll_position(point(0., minimap_scroll_top), window, cx);
+            }
         });
 
         // Required for the drop shadow to be visible
         const PADDING_OFFSET: Pixels = px(4.);
 
+        // Previously this container added `.shadow_xs()` so the minimap had a soft drop shadow. That extra node had to
+        // be repainted any time the hover popover changed, which caused a subtle opacity pulse. Removing the shadow
+        // keeps the minimap visually stable during hover updates.
         let mut minimap = div()
             .size_full()
-            .shadow_xs()
             .px(PADDING_OFFSET)
             .child(minimap_editor)
             .into_any_element();
@@ -8469,8 +8475,14 @@ impl LineWithInvisibles {
         for fragment in &self.fragments {
             match fragment {
                 LineFragment::Text(line) => {
-                    line.paint(fragment_origin, line_height, window, cx)
-                        .log_err();
+                    line.paint_with_kind(
+                        fragment_origin,
+                        line_height,
+                        GlyphKind::Buffer,
+                        window,
+                        cx,
+                    )
+                    .log_err();
                     fragment_origin.x += line.width;
                 }
                 LineFragment::Element { size, .. } => {
@@ -8562,7 +8574,7 @@ impl LineWithInvisibles {
                 [token_offset, token_end_offset],
                 Box::new(move |window: &mut Window, cx: &mut App| {
                     invisible_symbol
-                        .paint(origin, line_height, window, cx)
+                        .paint_with_kind(origin, line_height, GlyphKind::Buffer, window, cx)
                         .log_err();
                 }),
             )

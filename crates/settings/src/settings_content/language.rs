@@ -72,6 +72,7 @@ pub enum EditPredictionProvider {
     #[default]
     Copilot,
     Supermaven,
+    Ollama,
     Zed,
     Codestral,
     Experimental(&'static str),
@@ -91,6 +92,7 @@ impl<'de> Deserialize<'de> for EditPredictionProvider {
             None,
             Copilot,
             Supermaven,
+            Ollama,
             Zed,
             Codestral,
             Experimental(String),
@@ -100,6 +102,7 @@ impl<'de> Deserialize<'de> for EditPredictionProvider {
             Content::None => EditPredictionProvider::None,
             Content::Copilot => EditPredictionProvider::Copilot,
             Content::Supermaven => EditPredictionProvider::Supermaven,
+            Content::Ollama => EditPredictionProvider::Ollama,
             Content::Zed => EditPredictionProvider::Zed,
             Content::Codestral => EditPredictionProvider::Codestral,
             Content::Experimental(name)
@@ -134,6 +137,7 @@ impl EditPredictionProvider {
             | EditPredictionProvider::Copilot
             | EditPredictionProvider::Supermaven
             | EditPredictionProvider::Codestral
+            | EditPredictionProvider::Ollama
             | EditPredictionProvider::Experimental(_) => false,
         }
     }

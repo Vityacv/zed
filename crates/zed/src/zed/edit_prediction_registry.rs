@@ -7,6 +7,7 @@ use feature_flags::FeatureFlagAppExt;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, WeakEntity};
 use language::language_settings::{EditPredictionProvider, all_language_settings};
 use language_models::MistralLanguageModelProvider;
+use ollama::OllamaCompletionProvider;
 use settings::{
     EXPERIMENTAL_SWEEP_EDIT_PREDICTION_PROVIDER_NAME,
     EXPERIMENTAL_ZETA2_EDIT_PREDICTION_PROVIDER_NAME, SettingsStore,
@@ -46,7 +47,9 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
             editors
                 .borrow_mut()
                 .insert(editor_handle, window.window_handle());
-            let provider = all_language_settings(None, cx).edit_predictions.provider;
+            let provider = effective_edit_prediction_provider(
+                all_language_settings(None, cx).edit_predictions.provider,
+            );
             assign_edit_prediction_provider(
                 editor,
                 provider,
@@ -61,13 +64,18 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
 
     cx.on_action(clear_zeta_edit_history);
 
-    let mut provider = all_language_settings(None, cx).edit_predictions.provider;
+    let mut provider = effective_edit_prediction_provider(
+        all_language_settings(None, cx).edit_predictions.provider,
+    );
     cx.subscribe(&user_store, {
         let editors = editors.clone();
         let client = client.clone();
 
         move |user_store, event, cx| {
             if let client::user::Event::PrivateUserInfoUpdated = event {
+                let provider = effective_edit_prediction_provider(
+                    all_language_settings(None, cx).edit_predictions.provider,
+                );
                 assign_edit_prediction_providers(&editors, provider, &client, user_store, cx);
             }
         }
@@ -77,7 +85,9 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
     cx.observe_global::<SettingsStore>({
         let user_store = user_store.clone();
         move |cx| {
-            let new_provider = all_language_settings(None, cx).edit_predictions.provider;
+            let new_provider = effective_edit_prediction_provider(
+                all_language_settings(None, cx).edit_predictions.provider,
+            );
 
             if new_provider != provider {
                 telemetry::event!(
@@ -130,6 +140,17 @@ fn assign_edit_prediction_providers(
                 );
             })
         });
+    }
+}
+
+fn effective_edit_prediction_provider(provider: EditPredictionProvider) -> EditPredictionProvider {
+    if provider == EditPredictionProvider::None
+        && std::env::var(copilot::copilot_chat::COPILOT_OAUTH_ENV_VAR)
+            .map_or(false, |value| !value.is_empty())
+    {
+        EditPredictionProvider::Copilot
+    } else {
+        provider
     }
 }
 
@@ -200,6 +221,11 @@ fn assign_edit_prediction_provider(
         EditPredictionProvider::Codestral => {
             let http_client = client.http_client();
             let provider = cx.new(|_| CodestralCompletionProvider::new(http_client));
+            editor.set_edit_prediction_provider(Some(provider), window, cx);
+        }
+        EditPredictionProvider::Ollama => {
+            let http_client = client.http_client();
+            let provider = cx.new(|_| OllamaCompletionProvider::new(http_client.clone()));
             editor.set_edit_prediction_provider(Some(provider), window, cx);
         }
         value @ (EditPredictionProvider::Experimental(_) | EditPredictionProvider::Zed) => {

@@ -41,6 +41,15 @@ pub struct FontId(pub usize);
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub struct FontFamilyId(pub usize);
 
+/// Distinguishes glyphs rendered as part of the editor buffer from general UI text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GlyphKind {
+    /// Glyphs that belong to buffer content such as the code editor or terminal.
+    Buffer,
+    /// Glyphs rendered for the surrounding UI (menus, tooltips, panels, etc.).
+    Ui,
+}
+
 pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
 
 pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
@@ -777,6 +786,7 @@ pub(crate) struct RenderGlyphParams {
     pub(crate) subpixel_variant: Point<u8>,
     pub(crate) scale_factor: f32,
     pub(crate) is_emoji: bool,
+    pub(crate) glyph_kind: GlyphKind,
 }
 
 impl Eq for RenderGlyphParams {}
@@ -789,6 +799,7 @@ impl Hash for RenderGlyphParams {
         self.subpixel_variant.hash(state);
         self.scale_factor.to_bits().hash(state);
         self.is_emoji.hash(state);
+        self.glyph_kind.hash(state);
     }
 }
 

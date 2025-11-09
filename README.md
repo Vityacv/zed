@@ -1,3 +1,13 @@
+### Local Working Tree Changes
+
+This branch carries a handful of local patches that are not yet upstream:
+
+- **Render stack experiments:** custom antialiasing preferences for Linux (new `render_prefs` module, glyph-kind plumbing through gpui/text_system, and window/minimap tweaks) plus a blade renderer tweak for driver sample counts.
+- **Ollama edit predictions:** new provider crate, registry wiring, UI surface integration, and documentation/Q&A notes that track the feature.
+- **REPL disablement:** REPL crates and keybindings are commented out temporarily to avoid upstream dependency breakage; the quick action bar and runtime hooks are guarded accordingly.
+- **Tooling helpers:** `script/update-release-build`, change summaries, template files, and patch notes to support local workflows while these patches bake.
+
+
 # Zed
 
 [![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)

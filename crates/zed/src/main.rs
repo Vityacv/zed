@@ -588,14 +588,14 @@ pub fn main() {
             false,
             cx,
         );
-        repl::init(app_state.fs.clone(), cx);
+        // repl::init(app_state.fs.clone(), cx);  // Temporarily disabled due to upstream dependency issue
         recent_projects::init(cx);
 
         load_embedded_fonts(cx);
 
         editor::init(cx);
         image_viewer::init(cx);
-        repl::notebook::init(cx);
+        // repl::notebook::init(cx);  // Temporarily disabled due to upstream dependency issue
         diagnostics::init(cx);
 
         audio::init(cx);

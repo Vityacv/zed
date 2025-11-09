@@ -1,13 +1,14 @@
 use crate::{
     Bounds, DevicePixels, Font, FontFeatures, FontId, FontMetrics, FontRun, FontStyle, FontWeight,
-    GlyphId, LineLayout, Pixels, PlatformTextSystem, Point, RenderGlyphParams, SUBPIXEL_VARIANTS_X,
-    SUBPIXEL_VARIANTS_Y, ShapedGlyph, ShapedRun, SharedString, Size, point, size,
+    GlyphId, GlyphKind, LineLayout, Pixels, PlatformTextSystem, Point, RenderGlyphParams,
+    SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ShapedGlyph, ShapedRun, SharedString, Size, point,
+    size,
 };
 use anyhow::{Context as _, Ok, Result};
 use collections::HashMap;
 use cosmic_text::{
     Attrs, AttrsList, CacheKey, Family, Font as CosmicTextFont, FontFeatures as CosmicFontFeatures,
-    FontSystem, ShapeBuffer, ShapeLine, SwashCache,
+    FontSystem, ShapeBuffer, ShapeLine, SwashCache, SwashContent, SwashImage,
 };
 
 use itertools::Itertools;
@@ -17,7 +18,10 @@ use pathfinder_geometry::{
     vector::{Vector2F, Vector2I},
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use crate::render_prefs::{AntialiasingMode, buffer_antialiasing, ui_antialiasing};
 
 pub(crate) struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
 
@@ -48,6 +52,39 @@ struct LoadedFont {
     font: Arc<CosmicTextFont>,
     features: CosmicFontFeatures,
     is_known_emoji_font: bool,
+}
+
+fn apply_antialiasing_preferences(image: &mut SwashImage, glyph_kind: GlyphKind) {
+    if !matches!(image.content, SwashContent::Mask) {
+        return;
+    }
+
+    let prefs = match glyph_kind {
+        GlyphKind::Buffer => buffer_antialiasing(),
+        GlyphKind::Ui => ui_antialiasing(),
+    };
+
+    match prefs.mode {
+        AntialiasingMode::Default => {}
+        AntialiasingMode::Binary => {
+            for alpha in &mut image.data {
+                *alpha = if *alpha >= prefs.binary_threshold {
+                    0xFF
+                } else {
+                    0x00
+                };
+            }
+        }
+        AntialiasingMode::Reduced => {
+            let levels = prefs.reduced_levels.max(2);
+            let max_index = (levels - 1) as u16;
+            for alpha in &mut image.data {
+                let level_idx = ((*alpha as u16) * max_index + 127) / 255;
+                let quantized = (level_idx * 255) / max_index;
+                *alpha = quantized as u8;
+            }
+        }
+    }
 }
 
 impl CosmicTextSystem {
@@ -329,6 +366,10 @@ impl CosmicTextSystemState {
                 )
                 .clone()
                 .with_context(|| format!("no image for {params:?} in font {font:?}"))?;
+
+            if !params.is_emoji {
+                apply_antialiasing_preferences(&mut image, params.glyph_kind);
+            }
 
             if params.is_emoji {
                 // Convert from RGBA to BGRA.

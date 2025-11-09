@@ -1,7 +1,7 @@
 use crate::{
-    App, Bounds, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString, StrikethroughStyle,
-    TextAlign, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black, fill, point, px,
-    size,
+    App, Bounds, GlyphKind, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString,
+    StrikethroughStyle, TextAlign, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black,
+    fill, point, px, size,
 };
 use derive_more::{Deref, DerefMut};
 use smallvec::SmallVec;
@@ -67,6 +67,18 @@ impl ShapedLine {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<()> {
+        self.paint_with_kind(origin, line_height, GlyphKind::Ui, window, cx)
+    }
+
+    /// Paint the line of text to the window using the provided glyph classification.
+    pub fn paint_with_kind(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        glyph_kind: GlyphKind,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
         paint_line(
             origin,
             &self.layout,
@@ -75,6 +87,7 @@ impl ShapedLine {
             None,
             &self.decoration_runs,
             &[],
+            glyph_kind,
             window,
             cx,
         )?;
@@ -134,6 +147,28 @@ impl WrappedLine {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<()> {
+        self.paint_with_kind(
+            origin,
+            line_height,
+            align,
+            bounds,
+            GlyphKind::Ui,
+            window,
+            cx,
+        )
+    }
+
+    /// Paint this wrapped line of text to the window using the provided glyph classification.
+    pub fn paint_with_kind(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        align: TextAlign,
+        bounds: Option<Bounds<Pixels>>,
+        glyph_kind: GlyphKind,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
         let align_width = match bounds {
             Some(bounds) => Some(bounds.size.width),
             None => self.layout.wrap_width,
@@ -147,6 +182,7 @@ impl WrappedLine {
             align_width,
             &self.decoration_runs,
             &self.wrap_boundaries,
+            glyph_kind,
             window,
             cx,
         )?;
@@ -193,6 +229,7 @@ fn paint_line(
     align_width: Option<Pixels>,
     decoration_runs: &[DecorationRun],
     wrap_boundaries: &[WrapBoundary],
+    glyph_kind: GlyphKind,
     window: &mut Window,
     cx: &mut App,
 ) -> Result<()> {
@@ -375,6 +412,7 @@ fn paint_line(
                             run.font_id,
                             glyph.id,
                             layout.font_size,
+                            glyph_kind,
                         )?;
                     } else {
                         window.paint_glyph(
@@ -383,6 +421,7 @@ fn paint_line(
                             glyph.id,
                             layout.font_size,
                             color,
+                            glyph_kind,
                         )?;
                     }
                 }

@@ -302,6 +302,8 @@ impl Render for EditPredictionButton {
                         .with_handle(self.popover_menu_handle.clone()),
                 )
             }
+            EditPredictionProvider::Ollama => div(),
+
             provider @ (EditPredictionProvider::Experimental(_) | EditPredictionProvider::Zed) => {
                 let enabled = self.editor_enabled.unwrap_or(true);
 
@@ -574,6 +576,11 @@ impl EditPredictionButton {
 
                         menu.item(entry)
                     }
+                    EditPredictionProvider::Ollama => {
+                        menu.entry("Ollama", None, move |_, cx| {
+                            set_completion_provider(fs.clone(), cx, provider);
+                        })
+                    }
                     EditPredictionProvider::Experimental(
                         EXPERIMENTAL_ZETA2_EDIT_PREDICTION_PROVIDER_NAME,
                     ) => menu.entry("Zeta2", None, move |_, cx| {
@@ -693,6 +700,7 @@ impl EditPredictionButton {
                 | EditPredictionProvider::Copilot
                 | EditPredictionProvider::Supermaven
                 | EditPredictionProvider::Codestral
+                | EditPredictionProvider::Ollama
         ) {
             menu = menu
                 .separator()

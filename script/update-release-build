@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Ensure we are operating from the repository root to avoid surprises.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "Pulling latest changes..."
+git pull --ff-only
+
+# Disable debug info in the release profile.
+export CARGO_PROFILE_RELEASE_DEBUG=false
+if [[ -n "${RUSTFLAGS:-}" ]]; then
+  export RUSTFLAGS="$RUSTFLAGS -C debuginfo=0"
+else
+  export RUSTFLAGS="-C debuginfo=0"
+fi
+
+echo "Building release without debug info..."
+cargo build --release
+
+echo "Release build completed."
