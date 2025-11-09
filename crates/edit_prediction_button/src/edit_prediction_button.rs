@@ -298,6 +298,8 @@ impl Render for EditPredictionButton {
                 )
             }
 
+            EditPredictionProvider::Ollama => div(),
+
             EditPredictionProvider::Zed => {
                 let enabled = self.editor_enabled.unwrap_or(true);
 
@@ -525,6 +527,11 @@ impl EditPredictionButton {
                             set_completion_provider(fs.clone(), cx, provider);
                         })
                     }
+                    EditPredictionProvider::Ollama => {
+                        menu.entry("Ollama", None, move |_, cx| {
+                            set_completion_provider(fs.clone(), cx, provider);
+                        })
+                    }
                     EditPredictionProvider::None => continue,
                 };
             }
@@ -637,6 +644,7 @@ impl EditPredictionButton {
                 | EditPredictionProvider::Copilot
                 | EditPredictionProvider::Supermaven
                 | EditPredictionProvider::Codestral
+                | EditPredictionProvider::Ollama
         ) {
             menu = menu
                 .separator()

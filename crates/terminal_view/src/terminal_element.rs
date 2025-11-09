@@ -2,11 +2,11 @@ use editor::{CursorLayout, EditorSettings, HighlightedRange, HighlightedRangeLin
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, ContentMask, Context, DispatchPhase,
     Element, ElementId, Entity, FocusHandle, Font, FontFeatures, FontStyle, FontWeight,
-    GlobalElementId, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement, Interactivity,
-    IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton, MouseMoveEvent, Pixels,
-    Point, ShapedLine, StatefulInteractiveElement, StrikethroughStyle, Styled, TextRun, TextStyle,
-    UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window, div, fill, point, px, relative,
-    size,
+    GlobalElementId, GlyphKind, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement,
+    Interactivity, IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton,
+    MouseMoveEvent, Pixels, Point, ShapedLine, StatefulInteractiveElement, StrikethroughStyle,
+    Styled, TextRun, TextStyle, UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window,
+    div, fill, point, px, relative, size,
 };
 use itertools::Itertools;
 use language::CursorShape;
@@ -151,7 +151,7 @@ impl BatchedTextRun {
                 std::slice::from_ref(&self.style),
                 Some(dimensions.cell_width),
             )
-            .paint(pos, dimensions.line_height, window, cx);
+            .paint_with_kind(pos, dimensions.line_height, GlyphKind::Buffer, window, cx);
     }
 }
 

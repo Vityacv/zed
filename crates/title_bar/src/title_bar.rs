@@ -208,39 +208,18 @@ impl Render for TitleBar {
                 .into_any_element(),
         );
 
+        let mut bar_children = Vec::new();
         if show_menus {
-            self.platform_titlebar.update(cx, |this, _| {
-                this.set_children(
-                    self.application_menu
-                        .clone()
-                        .map(|menu| menu.into_any_element()),
-                );
-            });
-
-            let height = PlatformTitleBar::height(window);
-            let title_bar_color = self.platform_titlebar.update(cx, |platform_titlebar, cx| {
-                platform_titlebar.title_bar_color(window, cx)
-            });
-
-            v_flex()
-                .w_full()
-                .child(self.platform_titlebar.clone().into_any_element())
-                .child(
-                    h_flex()
-                        .bg(title_bar_color)
-                        .h(height)
-                        .pl_2()
-                        .justify_between()
-                        .w_full()
-                        .children(children),
-                )
-                .into_any_element()
-        } else {
-            self.platform_titlebar.update(cx, |this, _| {
-                this.set_children(children);
-            });
-            self.platform_titlebar.clone().into_any_element()
+            if let Some(menu) = self.application_menu.clone() {
+                bar_children.push(menu.into_any_element());
+            }
         }
+        bar_children.extend(children);
+
+        self.platform_titlebar.update(cx, |this, _| {
+            this.set_children(bar_children);
+        });
+        self.platform_titlebar.clone().into_any_element()
     }
 }
 

@@ -1013,8 +1013,9 @@ impl RenderingParameters {
         let path_sample_count = env::var("ZED_PATH_SAMPLE_COUNT")
             .ok()
             .and_then(|v| v.parse().ok())
+            .map(|count| if count == 0 { 1 } else { count })
             .or_else(|| {
-                [4, 2, 1]
+                [1, 2, 4]
                     .into_iter()
                     .find(|&n| (context.gpu.capabilities().sample_count_mask & n) != 0)
             })

@@ -1,0 +1,874 @@
+diff --git a/.cargo/config.toml b/.cargo/config.toml
+index 9b2e6f51c9..6559457f8f 100644
+--- a/.cargo/config.toml
++++ b/.cargo/config.toml
+@@ -1,6 +1,14 @@
+ [build]
+ # v0 mangling scheme provides more detailed backtraces around closures
+-rustflags = ["-C", "symbol-mangling-version=v0", "--cfg", "tokio_unstable"]
++rustflags = [
++    "-C",
++    "symbol-mangling-version=v0",
++    "--cfg",
++    "tokio_unstable",
++    "-C",
++    "link-arg=-fuse-ld=lld",
++]
++rustc-wrapper = "sccache"
+ 
+ [alias]
+ xtask = "run --package xtask --"
+@@ -16,5 +24,13 @@ rustflags = [
+     "target-feature=+crt-static", # This fixes the linking issue when compiling livekit on Windows
+ ]
+ 
++[target.x86_64-unknown-linux-gnu]
++linker = "clang"
++rustflags = ["-C", "link-arg=-fuse-ld=lld"]
++
+ [env]
+ MACOSX_DEPLOYMENT_TARGET = "10.15.7"
++RUSTC_WRAPPER = "sccache"
++
++[profile.release]
++incremental = true
+diff --git a/changes-summary.md b/changes-summary.md
+new file mode 100644
+index 0000000000..ed8230a195
+--- /dev/null
++++ b/changes-summary.md
+@@ -0,0 +1,50 @@
++# Custom Zed Tweaks Summary
++
++This document captures the experiments and adjustments we made during the investigation of
++hover/tooltip flicker, minimap behaviour, and theme overrides.
++
++## Rendering and Antialiasing
++- Added `crates/gpui/src/render_prefs.rs` and wired `GlyphKind` through the text rendering
++  pipeline so editor and UI glyphs can use different antialiasing profiles.
++- Buffer glyphs disable subpixel positioning by default; UI text keeps the smoother profile.
++- Forced `ZED_PATH_SAMPLE_COUNT` values of `0` or unset to resolve to `1` sample in the Blade
++  renderer, effectively disabling MSAA for text paths unless explicitly overridden.
++
++## Hover/Minimap Flicker Mitigation
++- Suppressed hover popover handling for minimap editors and removed the minimap drop shadow to
++  reduce opacity pulses during hover updates.
++- Avoid redundant minimap scroll synchronisation, only updating when the scroll offset actually
++  changes.
++- Documented the practical workaround of keeping minimap width ≤ 40 columns to minimise repaint
++  cost.
++
++## Title Bar and Menu Adjustments
++- Prevented application menus from opening immediately on first hover when `show_menus` is enabled.
++- Rewrote the menu construction logic so menus only switch on hover when another menu is already
++  open, matching traditional menu-bar behaviour.
++
++## Theme Overrides (user settings)
++- Demonstrated how to use `theme_overrides` in `settings.json` instead of per-theme JSON files to
++  adjust:
++  - `editor.background`
++  - `panel.background`
++  - `terminal.background`
++  - `editor.gutter.background`
++  - tab strip and tab colours
++  - `title_bar.background` and `status_bar.background`
++- Added notes about hiding the minimap thumb via transparent colours and narrowing the minimap to
++  avoid flicker.
++
++## LTEX & Diagnostics Tips
++- Ensured the LTeX language server is listed under `languages.Python.language_servers` and added
++  `"python"` to `lsp.ltex.settings.ltex.languageIds` so docstrings receive diagnostics.
++- Reminder: diagnostics and inline diagnostics can be toggled with keybindings mapped to
++  `editor::ToggleDiagnostics` and `editor::ToggleInlineDiagnostics`.
++
++## Remaining Observations
++- The residual hover flicker stems from minimap repaints inside the Blade renderer; eliminating it
++  entirely would require a deeper redesign of the minimap rendering pipeline.
++- Edit Predictions (Cursor-style Tab completions) remain tied to Zed’s hosted APIs; replacing them
++  with a local provider (e.g. Ollama) would require implementing a new `EditPredictionProvider` that
++  speaks the same request/response format.
++
+diff --git a/crates/editor/src/element.rs b/crates/editor/src/element.rs
+index 6b99b30757..0609caf035 100644
+--- a/crates/editor/src/element.rs
++++ b/crates/editor/src/element.rs
+@@ -42,13 +42,13 @@ use gpui::{
+     Action, Along, AnyElement, App, AppContext, AvailableSpace, Axis as ScrollbarAxis, BorderStyle,
+     Bounds, ClickEvent, ClipboardItem, ContentMask, Context, Corner, Corners, CursorStyle,
+     DispatchPhase, Edges, Element, ElementInputHandler, Entity, Focusable as _, FontId,
+-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, IsZero,
+-    KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent,
+-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, ScrollDelta,
+-    ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Size, StatefulInteractiveElement,
+-    Style, Styled, TextRun, TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill,
+-    linear_color_stop, linear_gradient, outline, point, px, quad, relative, size, solid_background,
+-    transparent_black,
++    GlobalElementId, GlyphKind, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement,
++    IsZero, KeybindingKeystroke, Length, Modifiers, ModifiersChangedEvent, MouseButton,
++    MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement,
++    Pixels, ScrollDelta, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Size,
++    StatefulInteractiveElement, Style, Styled, TextRun, TextStyleRefinement, WeakEntity, Window,
++    anchored, deferred, div, fill, linear_color_stop, linear_gradient, outline, point, px, quad,
++    relative, size, solid_background, transparent_black,
+ };
+ use itertools::Itertools;
+ use language::{IndentGuideSettings, language_settings::ShowWhitespaceSetting};
+@@ -1914,16 +1914,22 @@ impl EditorElement {
+         )
+         .with_thumb_state(thumb_state);
+ 
++        const MINIMAP_SCROLL_EPSILON: f32 = 0.01;
+         minimap_editor.update(cx, |editor, cx| {
+-            editor.set_scroll_position(point(0., minimap_scroll_top), window, cx)
++            let current = editor.scroll_position(cx);
++            if (current.y - minimap_scroll_top).abs() > MINIMAP_SCROLL_EPSILON || current.x != 0.0 {
++                editor.set_scroll_position(point(0., minimap_scroll_top), window, cx);
++            }
+         });
+ 
+         // Required for the drop shadow to be visible
+         const PADDING_OFFSET: Pixels = px(4.);
+ 
++        // Previously this container added `.shadow_xs()` so the minimap had a soft drop shadow. That extra node had to
++        // be repainted any time the hover popover changed, which caused a subtle opacity pulse. Removing the shadow
++        // keeps the minimap visually stable during hover updates.
+         let mut minimap = div()
+             .size_full()
+-            .shadow_xs()
+             .px(PADDING_OFFSET)
+             .child(minimap_editor)
+             .into_any_element();
+@@ -7936,8 +7942,14 @@ impl LineWithInvisibles {
+         for fragment in &self.fragments {
+             match fragment {
+                 LineFragment::Text(line) => {
+-                    line.paint(fragment_origin, line_height, window, cx)
+-                        .log_err();
++                    line.paint_with_kind(
++                        fragment_origin,
++                        line_height,
++                        GlyphKind::Buffer,
++                        window,
++                        cx,
++                    )
++                    .log_err();
+                     fragment_origin.x += line.width;
+                 }
+                 LineFragment::Element { size, .. } => {
+@@ -8024,7 +8036,7 @@ impl LineWithInvisibles {
+                 [token_offset, token_end_offset],
+                 Box::new(move |window: &mut Window, cx: &mut App| {
+                     invisible_symbol
+-                        .paint(origin, line_height, window, cx)
++                        .paint_with_kind(origin, line_height, GlyphKind::Buffer, window, cx)
+                         .log_err();
+                 }),
+             )
+diff --git a/crates/editor/src/hover_popover.rs b/crates/editor/src/hover_popover.rs
+index 1815029207..0c859e7dee 100644
+--- a/crates/editor/src/hover_popover.rs
++++ b/crates/editor/src/hover_popover.rs
+@@ -36,6 +36,9 @@ pub const HOVER_POPOVER_GAP: Pixels = px(10.);
+ 
+ /// Bindable action which uses the most recent selection head to trigger a hover
+ pub fn hover(editor: &mut Editor, _: &Hover, window: &mut Window, cx: &mut Context<Editor>) {
++    if editor.mode().is_minimap() {
++        return;
++    }
+     let head = editor.selections.newest_anchor().head();
+     show_hover(editor, head, true, window, cx);
+ }
+@@ -48,6 +51,9 @@ pub fn hover_at(
+     window: &mut Window,
+     cx: &mut Context<Editor>,
+ ) {
++    if editor.mode().is_minimap() {
++        return;
++    }
+     if EditorSettings::get_global(cx).hover_popover_enabled {
+         if show_keyboard_hover(editor, window, cx) {
+             return;
+@@ -128,6 +134,9 @@ pub fn hover_at_inlay(
+     window: &mut Window,
+     cx: &mut Context<Editor>,
+ ) {
++    if editor.mode().is_minimap() {
++        return;
++    }
+     if EditorSettings::get_global(cx).hover_popover_enabled {
+         if editor.pending_rename.is_some() {
+             return;
+@@ -137,6 +146,10 @@ pub fn hover_at_inlay(
+             return;
+         };
+ 
++        if editor.mode().is_minimap() {
++            return;
++        }
++
+         if editor
+             .hover_state
+             .info_popovers
+diff --git a/crates/gpui/src/gpui.rs b/crates/gpui/src/gpui.rs
+index eda10a41ab..df9d323785 100644
+--- a/crates/gpui/src/gpui.rs
++++ b/crates/gpui/src/gpui.rs
+@@ -89,6 +89,7 @@ mod keymap;
+ mod path_builder;
+ mod platform;
+ pub mod prelude;
++mod render_prefs;
+ mod scene;
+ mod shared_string;
+ mod shared_uri;
+diff --git a/crates/gpui/src/platform/blade/blade_renderer.rs b/crates/gpui/src/platform/blade/blade_renderer.rs
+index d00fbdc7f1..3dd76953b4 100644
+--- a/crates/gpui/src/platform/blade/blade_renderer.rs
++++ b/crates/gpui/src/platform/blade/blade_renderer.rs
+@@ -1012,8 +1012,9 @@ impl RenderingParameters {
+         let path_sample_count = env::var("ZED_PATH_SAMPLE_COUNT")
+             .ok()
+             .and_then(|v| v.parse().ok())
++            .map(|count| if count == 0 { 1 } else { count })
+             .or_else(|| {
+-                [4, 2, 1]
++                [1, 2, 4]
+                     .into_iter()
+                     .find(|&n| (context.gpu.capabilities().sample_count_mask & n) != 0)
+             })
+diff --git a/crates/gpui/src/platform/linux/text_system.rs b/crates/gpui/src/platform/linux/text_system.rs
+index 958d509d53..3c36cbb30c 100644
+--- a/crates/gpui/src/platform/linux/text_system.rs
++++ b/crates/gpui/src/platform/linux/text_system.rs
+@@ -1,13 +1,14 @@
+ use crate::{
+     Bounds, DevicePixels, Font, FontFeatures, FontId, FontMetrics, FontRun, FontStyle, FontWeight,
+-    GlyphId, LineLayout, Pixels, PlatformTextSystem, Point, RenderGlyphParams, SUBPIXEL_VARIANTS_X,
+-    SUBPIXEL_VARIANTS_Y, ShapedGlyph, ShapedRun, SharedString, Size, point, size,
++    GlyphId, GlyphKind, LineLayout, Pixels, PlatformTextSystem, Point, RenderGlyphParams,
++    SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ShapedGlyph, ShapedRun, SharedString, Size, point,
++    size,
+ };
+ use anyhow::{Context as _, Ok, Result};
+ use collections::HashMap;
+ use cosmic_text::{
+     Attrs, AttrsList, CacheKey, Family, Font as CosmicTextFont, FontFeatures as CosmicFontFeatures,
+-    FontSystem, ShapeBuffer, ShapeLine, SwashCache,
++    FontSystem, ShapeBuffer, ShapeLine, SwashCache, SwashContent, SwashImage,
+ };
+ 
+ use itertools::Itertools;
+@@ -17,7 +18,10 @@ use pathfinder_geometry::{
+     vector::{Vector2F, Vector2I},
+ };
+ use smallvec::SmallVec;
+-use std::{borrow::Cow, sync::Arc};
++use std::borrow::Cow;
++use std::sync::Arc;
++
++use crate::render_prefs::{AntialiasingMode, buffer_antialiasing, ui_antialiasing};
+ 
+ pub(crate) struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
+ 
+@@ -50,6 +54,39 @@ struct LoadedFont {
+     is_known_emoji_font: bool,
+ }
+ 
++fn apply_antialiasing_preferences(image: &mut SwashImage, glyph_kind: GlyphKind) {
++    if !matches!(image.content, SwashContent::Mask) {
++        return;
++    }
++
++    let prefs = match glyph_kind {
++        GlyphKind::Buffer => buffer_antialiasing(),
++        GlyphKind::Ui => ui_antialiasing(),
++    };
++
++    match prefs.mode {
++        AntialiasingMode::Default => {}
++        AntialiasingMode::Binary => {
++            for alpha in &mut image.data {
++                *alpha = if *alpha >= prefs.binary_threshold {
++                    0xFF
++                } else {
++                    0x00
++                };
++            }
++        }
++        AntialiasingMode::Reduced => {
++            let levels = prefs.reduced_levels.max(2);
++            let max_index = (levels - 1) as u16;
++            for alpha in &mut image.data {
++                let level_idx = ((*alpha as u16) * max_index + 127) / 255;
++                let quantized = (level_idx * 255) / max_index;
++                *alpha = quantized as u8;
++            }
++        }
++    }
++}
++
+ impl CosmicTextSystem {
+     pub(crate) fn new() -> Self {
+         // todo(linux) make font loading non-blocking
+@@ -330,6 +367,10 @@ impl CosmicTextSystemState {
+                 .clone()
+                 .with_context(|| format!("no image for {params:?} in font {font:?}"))?;
+ 
++            if !params.is_emoji {
++                apply_antialiasing_preferences(&mut image, params.glyph_kind);
++            }
++
+             if params.is_emoji {
+                 // Convert from RGBA to BGRA.
+                 for pixel in image.data.chunks_exact_mut(4) {
+diff --git a/crates/gpui/src/render_prefs.rs b/crates/gpui/src/render_prefs.rs
+new file mode 100644
+index 0000000000..27839466e4
+--- /dev/null
++++ b/crates/gpui/src/render_prefs.rs
+@@ -0,0 +1,205 @@
++use std::sync::OnceLock;
++
++#[cfg(target_os = "linux")]
++use serde::Deserialize;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum AntialiasingMode {
++    Default,
++    Binary,
++    Reduced,
++}
++
++#[derive(Clone, Copy, Debug)]
++pub(crate) struct AntialiasingPrefs {
++    pub(crate) buffer: AntialiasingProfile,
++    pub(crate) ui: AntialiasingProfile,
++}
++
++impl Default for AntialiasingPrefs {
++    fn default() -> Self {
++        Self {
++            buffer: AntialiasingProfile::default_buffer(),
++            ui: AntialiasingProfile::default_ui(),
++        }
++    }
++}
++
++#[derive(Clone, Copy, Debug)]
++pub(crate) struct AntialiasingProfile {
++    pub(crate) mode: AntialiasingMode,
++    pub(crate) binary_threshold: u8,
++    pub(crate) reduced_levels: u8,
++    pub(crate) disable_subpixel_positioning: bool,
++}
++
++impl AntialiasingProfile {
++    pub const fn default_buffer() -> Self {
++        Self {
++            mode: AntialiasingMode::Binary,
++            binary_threshold: 96,
++            reduced_levels: 4,
++            disable_subpixel_positioning: true,
++        }
++    }
++
++    pub const fn default_ui() -> Self {
++        Self {
++            mode: AntialiasingMode::Default,
++            binary_threshold: 96,
++            reduced_levels: 4,
++            disable_subpixel_positioning: false,
++        }
++    }
++
++    pub fn apply_env_overrides(&mut self, prefix: &str) {
++        if let Some(value) = std::env::var(format!("{prefix}_MODE"))
++            .ok()
++            .and_then(|value| parse_antialiasing_mode(value.trim()))
++        {
++            self.mode = value;
++        }
++
++        if let Some(value) = std::env::var(format!("{prefix}_BINARY_THRESHOLD"))
++            .ok()
++            .and_then(|value| value.parse::<u16>().ok())
++        {
++            self.binary_threshold = value.min(u8::MAX as u16) as u8;
++        }
++
++        if let Some(value) = std::env::var(format!("{prefix}_REDUCED_LEVELS"))
++            .ok()
++            .and_then(|value| value.parse::<u16>().ok())
++        {
++            self.reduced_levels = clamp_reduced_levels(value as u8);
++        }
++
++        if std::env::var(format!("{prefix}_DISABLE_SUBPIXEL_POSITIONING"))
++            .map(|value| value != "0")
++            .unwrap_or(false)
++        {
++            self.disable_subpixel_positioning = true;
++        }
++    }
++
++    pub fn apply_config(&mut self, config: &ProfileConfig) {
++        if let Some(mode) = config.mode.as_deref().and_then(parse_antialiasing_mode) {
++            self.mode = mode;
++        }
++
++        if let Some(threshold) = config.binary_threshold {
++            self.binary_threshold = threshold;
++        }
++
++        if let Some(levels) = config.reduced_levels {
++            self.reduced_levels = clamp_reduced_levels(levels);
++        }
++
++        if let Some(disable) = config.disable_subpixel_positioning {
++            self.disable_subpixel_positioning = disable;
++        }
++    }
++}
++
++fn parse_antialiasing_mode(value: &str) -> Option<AntialiasingMode> {
++    match value.trim().to_ascii_lowercase().as_str() {
++        "default" | "aa" | "antialias" | "antialiasing" => Some(AntialiasingMode::Default),
++        "binary" | "mono" | "monochrome" | "none" | "off" | "disable" | "disabled" | "noaa" => {
++            Some(AntialiasingMode::Binary)
++        }
++        "reduced" | "low" | "steps" | "quantized" | "quantised" => Some(AntialiasingMode::Reduced),
++        _ => None,
++    }
++}
++
++fn clamp_reduced_levels(levels: u8) -> u8 {
++    levels.clamp(2, 8)
++}
++
++#[cfg_attr(target_os = "linux", derive(Deserialize))]
++#[derive(Default)]
++pub(crate) struct ProfileConfig {
++    #[cfg_attr(target_os = "linux", serde(default))]
++    mode: Option<String>,
++    #[cfg_attr(target_os = "linux", serde(default))]
++    binary_threshold: Option<u8>,
++    #[cfg_attr(target_os = "linux", serde(default))]
++    reduced_levels: Option<u8>,
++    #[cfg_attr(target_os = "linux", serde(default))]
++    disable_subpixel_positioning: Option<bool>,
++}
++
++#[cfg(target_os = "linux")]
++mod platform {
++    use super::{AntialiasingPrefs, ProfileConfig};
++    use serde::Deserialize;
++    use std::{env, fs, path::PathBuf};
++
++    #[derive(Default, Deserialize)]
++    struct AntialiasingConfig {
++        #[serde(default)]
++        buffer: Option<ProfileConfig>,
++        #[serde(default)]
++        ui: Option<ProfileConfig>,
++    }
++
++    pub(super) fn load_prefs() -> AntialiasingPrefs {
++        let mut prefs = AntialiasingPrefs::default();
++
++        prefs.buffer.apply_env_overrides("ZED_ANTIALIASING");
++        prefs.ui.apply_env_overrides("ZED_UI_ANTIALIASING");
++
++        if let Some(path) = antialiasing_config_path() {
++            if let Ok(contents) = fs::read_to_string(path) {
++                if let Ok(config) = serde_json::from_str::<AntialiasingConfig>(&contents) {
++                    if let Some(buffer) = config.buffer {
++                        prefs.buffer.apply_config(&buffer);
++                    }
++                    if let Some(ui) = config.ui {
++                        prefs.ui.apply_config(&ui);
++                    }
++                }
++            }
++        }
++
++        log::info!(
++            "Antialiasing profiles loaded: buffer={:?}, ui={:?}",
++            prefs.buffer,
++            prefs.ui
++        );
++
++        prefs
++    }
++
++    fn antialiasing_config_path() -> Option<PathBuf> {
++        let mut path = PathBuf::from(env::var_os("HOME")?);
++        path.push(".config");
++        path.push("zed");
++        path.push("antialiasing.json");
++        Some(path)
++    }
++
++    // clamp/parse helpers defined at top level
++}
++
++#[cfg(not(target_os = "linux"))]
++mod platform {
++    use super::AntialiasingPrefs;
++
++    pub(super) fn load_prefs() -> AntialiasingPrefs {
++        AntialiasingPrefs::default()
++    }
++}
++
++pub(crate) fn antialiasing_prefs() -> &'static AntialiasingPrefs {
++    static PREFS: OnceLock<AntialiasingPrefs> = OnceLock::new();
++    PREFS.get_or_init(platform::load_prefs)
++}
++
++pub(crate) fn buffer_antialiasing() -> &'static AntialiasingProfile {
++    &antialiasing_prefs().buffer
++}
++
++pub(crate) fn ui_antialiasing() -> &'static AntialiasingProfile {
++    &antialiasing_prefs().ui
++}
+diff --git a/crates/gpui/src/text_system.rs b/crates/gpui/src/text_system.rs
+index 83fb4993e0..323de523e9 100644
+--- a/crates/gpui/src/text_system.rs
++++ b/crates/gpui/src/text_system.rs
+@@ -41,6 +41,15 @@ pub struct FontId(pub usize);
+ #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
+ pub struct FontFamilyId(pub usize);
+ 
++/// Distinguishes glyphs rendered as part of the editor buffer from general UI text.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
++pub enum GlyphKind {
++    /// Glyphs that belong to buffer content such as the code editor or terminal.
++    Buffer,
++    /// Glyphs rendered for the surrounding UI (menus, tooltips, panels, etc.).
++    Ui,
++}
++
+ pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
+ 
+ pub(crate) const SUBPIXEL_VARIANTS_Y: u8 =
+@@ -714,6 +723,7 @@ pub(crate) struct RenderGlyphParams {
+     pub(crate) subpixel_variant: Point<u8>,
+     pub(crate) scale_factor: f32,
+     pub(crate) is_emoji: bool,
++    pub(crate) glyph_kind: GlyphKind,
+ }
+ 
+ impl Eq for RenderGlyphParams {}
+@@ -726,6 +736,7 @@ impl Hash for RenderGlyphParams {
+         self.subpixel_variant.hash(state);
+         self.scale_factor.to_bits().hash(state);
+         self.is_emoji.hash(state);
++        self.glyph_kind.hash(state);
+     }
+ }
+ 
+diff --git a/crates/gpui/src/text_system/line.rs b/crates/gpui/src/text_system/line.rs
+index 8d559f9815..a8c452ef03 100644
+--- a/crates/gpui/src/text_system/line.rs
++++ b/crates/gpui/src/text_system/line.rs
+@@ -1,7 +1,7 @@
+ use crate::{
+-    App, Bounds, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString, StrikethroughStyle,
+-    TextAlign, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black, fill, point, px,
+-    size,
++    App, Bounds, GlyphKind, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString,
++    StrikethroughStyle, TextAlign, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black,
++    fill, point, px, size,
+ };
+ use derive_more::{Deref, DerefMut};
+ use smallvec::SmallVec;
+@@ -66,6 +66,18 @@ impl ShapedLine {
+         line_height: Pixels,
+         window: &mut Window,
+         cx: &mut App,
++    ) -> Result<()> {
++        self.paint_with_kind(origin, line_height, GlyphKind::Ui, window, cx)
++    }
++
++    /// Paint the line of text to the window using the provided glyph classification.
++    pub fn paint_with_kind(
++        &self,
++        origin: Point<Pixels>,
++        line_height: Pixels,
++        glyph_kind: GlyphKind,
++        window: &mut Window,
++        cx: &mut App,
+     ) -> Result<()> {
+         paint_line(
+             origin,
+@@ -75,6 +87,7 @@ impl ShapedLine {
+             None,
+             &self.decoration_runs,
+             &[],
++            glyph_kind,
+             window,
+             cx,
+         )?;
+@@ -133,6 +146,28 @@ impl WrappedLine {
+         bounds: Option<Bounds<Pixels>>,
+         window: &mut Window,
+         cx: &mut App,
++    ) -> Result<()> {
++        self.paint_with_kind(
++            origin,
++            line_height,
++            align,
++            bounds,
++            GlyphKind::Ui,
++            window,
++            cx,
++        )
++    }
++
++    /// Paint this wrapped line of text to the window using the provided glyph classification.
++    pub fn paint_with_kind(
++        &self,
++        origin: Point<Pixels>,
++        line_height: Pixels,
++        align: TextAlign,
++        bounds: Option<Bounds<Pixels>>,
++        glyph_kind: GlyphKind,
++        window: &mut Window,
++        cx: &mut App,
+     ) -> Result<()> {
+         let align_width = match bounds {
+             Some(bounds) => Some(bounds.size.width),
+@@ -147,6 +182,7 @@ impl WrappedLine {
+             align_width,
+             &self.decoration_runs,
+             &self.wrap_boundaries,
++            glyph_kind,
+             window,
+             cx,
+         )?;
+@@ -193,6 +229,7 @@ fn paint_line(
+     align_width: Option<Pixels>,
+     decoration_runs: &[DecorationRun],
+     wrap_boundaries: &[WrapBoundary],
++    glyph_kind: GlyphKind,
+     window: &mut Window,
+     cx: &mut App,
+ ) -> Result<()> {
+@@ -375,6 +412,7 @@ fn paint_line(
+                             run.font_id,
+                             glyph.id,
+                             layout.font_size,
++                            glyph_kind,
+                         )?;
+                     } else {
+                         window.paint_glyph(
+@@ -383,6 +421,7 @@ fn paint_line(
+                             glyph.id,
+                             layout.font_size,
+                             color,
++                            glyph_kind,
+                         )?;
+                     }
+                 }
+diff --git a/crates/gpui/src/window.rs b/crates/gpui/src/window.rs
+index 19faa1135f..ef84ce2590 100644
+--- a/crates/gpui/src/window.rs
++++ b/crates/gpui/src/window.rs
+@@ -5,18 +5,19 @@ use crate::{
+     AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
+     Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
+     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
+-    FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
+-    KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId,
+-    LineLayoutIndex, Modifiers, ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent,
+-    MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+-    PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, PromptButton, PromptLevel, Quad,
+-    Render, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
+-    SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow,
+-    SharedString, Size, StrikethroughStyle, Style, SubscriberSet, Subscription, SystemWindowTab,
+-    SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement,
+-    TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
+-    WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem,
+-    point, prelude::*, px, rems, size, transparent_black,
++    FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GlyphKind, GpuSpecs, Hsla,
++    InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
++    KeystrokeEvent, LayoutId, LineLayoutIndex, Modifiers, ModifiersChangedEvent, MonochromeSprite,
++    MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas,
++    PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PolychromeSprite,
++    PromptButton, PromptLevel, Quad, Render, RenderGlyphParams, RenderImage, RenderImageParams,
++    RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X,
++    SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, SharedString, Size, StrikethroughStyle,
++    Style, SubscriberSet, Subscription, SystemWindowTab, SystemWindowTabController, TabStopMap,
++    TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement, TransformationMatrix, Underline,
++    UnderlineStyle, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControls,
++    WindowDecorations, WindowOptions, WindowParams, WindowTextSystem, point, prelude::*, px, rems,
++    size, transparent_black,
+ };
+ use anyhow::{Context as _, Result, anyhow};
+ use collections::{FxHashMap, FxHashSet};
+@@ -2949,6 +2950,7 @@ impl Window {
+         glyph_id: GlyphId,
+         font_size: Pixels,
+         color: Hsla,
++        glyph_kind: GlyphKind,
+     ) -> Result<()> {
+         self.invalidator.debug_assert_paint();
+ 
+@@ -2956,10 +2958,18 @@ impl Window {
+         let scale_factor = self.scale_factor();
+         let glyph_origin = origin.scale(scale_factor);
+ 
+-        let subpixel_variant = Point {
++        let profile = match glyph_kind {
++            GlyphKind::Buffer => crate::render_prefs::buffer_antialiasing(),
++            GlyphKind::Ui => crate::render_prefs::ui_antialiasing(),
++        };
++
++        let mut subpixel_variant = Point {
+             x: (glyph_origin.x.0.fract() * SUBPIXEL_VARIANTS_X as f32).floor() as u8,
+             y: (glyph_origin.y.0.fract() * SUBPIXEL_VARIANTS_Y as f32).floor() as u8,
+         };
++        if profile.disable_subpixel_positioning {
++            subpixel_variant = Point { x: 0, y: 0 };
++        }
+         let params = RenderGlyphParams {
+             font_id,
+             glyph_id,
+@@ -2967,6 +2977,7 @@ impl Window {
+             subpixel_variant,
+             scale_factor,
+             is_emoji: false,
++            glyph_kind,
+         };
+ 
+         let raster_bounds = self.text_system().raster_bounds(&params)?;
+@@ -3010,6 +3021,7 @@ impl Window {
+         font_id: FontId,
+         glyph_id: GlyphId,
+         font_size: Pixels,
++        glyph_kind: GlyphKind,
+     ) -> Result<()> {
+         self.invalidator.debug_assert_paint();
+ 
+@@ -3023,6 +3035,7 @@ impl Window {
+             subpixel_variant: Default::default(),
+             scale_factor,
+             is_emoji: true,
++            glyph_kind,
+         };
+ 
+         let raster_bounds = self.text_system().raster_bounds(&params)?;
+diff --git a/crates/terminal_view/src/terminal_element.rs b/crates/terminal_view/src/terminal_element.rs
+index a786aa20e6..711e4182e1 100644
+--- a/crates/terminal_view/src/terminal_element.rs
++++ b/crates/terminal_view/src/terminal_element.rs
+@@ -2,11 +2,11 @@ use editor::{CursorLayout, EditorSettings, HighlightedRange, HighlightedRangeLin
+ use gpui::{
+     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, ContentMask, Context, DispatchPhase,
+     Element, ElementId, Entity, FocusHandle, Font, FontFeatures, FontStyle, FontWeight,
+-    GlobalElementId, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement, Interactivity,
+-    IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton, MouseMoveEvent, Pixels,
+-    Point, ShapedLine, StatefulInteractiveElement, StrikethroughStyle, Styled, TextRun, TextStyle,
+-    UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window, div, fill, point, px, relative,
+-    size,
++    GlobalElementId, GlyphKind, HighlightStyle, Hitbox, Hsla, InputHandler, InteractiveElement,
++    Interactivity, IntoElement, LayoutId, Length, ModifiersChangedEvent, MouseButton,
++    MouseMoveEvent, Pixels, Point, ShapedLine, StatefulInteractiveElement, StrikethroughStyle,
++    Styled, TextRun, TextStyle, UTF16Selection, UnderlineStyle, WeakEntity, WhiteSpace, Window,
++    div, fill, point, px, relative, size,
+ };
+ use itertools::Itertools;
+ use language::CursorShape;
+@@ -139,7 +139,7 @@ impl BatchedTextRun {
+                 std::slice::from_ref(&self.style),
+                 Some(dimensions.cell_width),
+             )
+-            .paint(pos, dimensions.line_height, window, cx);
++            .paint_with_kind(pos, dimensions.line_height, GlyphKind::Buffer, window, cx);
+     }
+ }
+ 
+diff --git a/crates/title_bar/src/application_menu.rs b/crates/title_bar/src/application_menu.rs
+index 4a8cac2435..11865eb8c0 100644
+--- a/crates/title_bar/src/application_menu.rs
++++ b/crates/title_bar/src/application_menu.rs
+@@ -194,13 +194,19 @@ impl ApplicationMenu {
+                     .with_handle(current_handle.clone()),
+             )
+             .on_hover(move |hover_enter, window, cx| {
+-                if *hover_enter && !current_handle.is_deployed() {
+-                    all_handles.iter().for_each(|h| h.hide(cx));
++                if !*hover_enter || current_handle.is_deployed() {
++                    return;
++                }
+ 
+-                    // We need to defer this so that this menu handle can take focus from the previous menu
+-                    let handle = current_handle.clone();
+-                    window.defer(cx, move |window, cx| handle.show(window, cx));
++                if all_handles.iter().all(|handle| !handle.is_deployed()) {
++                    return;
+                 }
++
++                all_handles.iter().for_each(|handle| handle.hide(cx));
++
++                // We need to defer this so that this menu handle can take focus from the previous menu
++                let handle = current_handle.clone();
++                window.defer(cx, move |window, cx| handle.show(window, cx));
+             })
+     }
+ 
+diff --git a/crates/title_bar/src/title_bar.rs b/crates/title_bar/src/title_bar.rs
+index d326a48265..362aec78e7 100644
+--- a/crates/title_bar/src/title_bar.rs
++++ b/crates/title_bar/src/title_bar.rs
+@@ -203,39 +203,18 @@ impl Render for TitleBar {
+                 .into_any_element(),
+         );
+ 
++        let mut bar_children = Vec::new();
+         if show_menus {
+-            self.platform_titlebar.update(cx, |this, _| {
+-                this.set_children(
+-                    self.application_menu
+-                        .clone()
+-                        .map(|menu| menu.into_any_element()),
+-                );
+-            });
+-
+-            let height = PlatformTitleBar::height(window);
+-            let title_bar_color = self.platform_titlebar.update(cx, |platform_titlebar, cx| {
+-                platform_titlebar.title_bar_color(window, cx)
+-            });
+-
+-            v_flex()
+-                .w_full()
+-                .child(self.platform_titlebar.clone().into_any_element())
+-                .child(
+-                    h_flex()
+-                        .bg(title_bar_color)
+-                        .h(height)
+-                        .pl_2()
+-                        .justify_between()
+-                        .w_full()
+-                        .children(children),
+-                )
+-                .into_any_element()
+-        } else {
+-            self.platform_titlebar.update(cx, |this, _| {
+-                this.set_children(children);
+-            });
+-            self.platform_titlebar.clone().into_any_element()
++            if let Some(menu) = self.application_menu.clone() {
++                bar_children.push(menu.into_any_element());
++            }
+         }
++        bar_children.extend(children);
++
++        self.platform_titlebar.update(cx, |this, _| {
++            this.set_children(bar_children);
++        });
++        self.platform_titlebar.clone().into_any_element()
+     }
+ }
+ 
