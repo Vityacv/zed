@@ -1,5 +1,8 @@
-use anyhow::{Context, Result};
+mod edit_prediction_completion_provider;
 
+pub use edit_prediction_completion_provider::OllamaCompletionProvider;
+
+use anyhow::{Context as _, Result};
 use futures::{AsyncBufReadExt, AsyncReadExt, StreamExt, io::BufReader, stream::BoxStream};
 use http_client::{AsyncBody, HttpClient, HttpRequestExt, Method, Request as HttpRequest};
 use serde::{Deserialize, Serialize};

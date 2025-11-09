@@ -7,7 +7,6 @@ use editor::Editor;
 use feature_flags::FeatureFlagAppExt;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, WeakEntity};
 use language::language_settings::{EditPredictionProvider, all_language_settings};
-
 use settings::{
     EXPERIMENTAL_ZETA2_EDIT_PREDICTION_PROVIDER_NAME, EditPredictionPromptFormat, SettingsStore,
 };
@@ -248,6 +247,17 @@ fn assign_edit_prediction_providers(
                 );
             })
         });
+    }
+}
+
+fn effective_edit_prediction_provider(provider: EditPredictionProvider) -> EditPredictionProvider {
+    if provider == EditPredictionProvider::None
+        && std::env::var(copilot_chat::COPILOT_OAUTH_ENV_VAR)
+            .map_or(false, |value| !value.is_empty())
+    {
+        EditPredictionProvider::Copilot
+    } else {
+        provider
     }
 }
 

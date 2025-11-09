@@ -155,7 +155,7 @@ members = [
     "crates/remote",
     "crates/remote_connection",
     "crates/remote_server",
-    "crates/repl",
+    # "crates/repl",  # Temporarily disabled due to upstream jupyter-websocket-client async-tungstenite dependency issue
     "crates/reqwest_client",
     "crates/rich_text",
     "crates/rope",

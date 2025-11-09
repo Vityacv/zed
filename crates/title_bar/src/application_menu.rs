@@ -202,13 +202,19 @@ impl ApplicationMenu {
                     .with_handle(current_handle.clone()),
             )
             .on_hover(move |hover_enter, window, cx| {
-                if *hover_enter && !current_handle.is_deployed() {
-                    all_handles.iter().for_each(|h| h.hide(cx));
-
-                    // We need to defer this so that this menu handle can take focus from the previous menu
-                    let handle = current_handle.clone();
-                    window.defer(cx, move |window, cx| handle.show(window, cx));
+                if !*hover_enter || current_handle.is_deployed() {
+                    return;
                 }
+
+                if all_handles.iter().all(|handle| !handle.is_deployed()) {
+                    return;
+                }
+
+                all_handles.iter().for_each(|handle| handle.hide(cx));
+
+                // We need to defer this so that this menu handle can take focus from the previous menu
+                let handle = current_handle.clone();
+                window.defer(cx, move |window, cx| handle.show(window, cx));
             })
     }
 

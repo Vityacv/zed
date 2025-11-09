@@ -1,6 +1,14 @@
 [build]
 # v0 mangling scheme provides more detailed backtraces around closures
-rustflags = ["-C", "symbol-mangling-version=v0", "--cfg", "tokio_unstable"]
+rustflags = [
+    "-C",
+    "symbol-mangling-version=v0",
+    "--cfg",
+    "tokio_unstable",
+    "-C",
+    "link-arg=-fuse-ld=lld",
+]
+rustc-wrapper = "sccache"
 
 [alias]
 xtask = "run --package xtask --"
@@ -16,5 +24,14 @@ rustflags = [
     "target-feature=+crt-static", # This fixes the linking issue when compiling livekit on Windows
 ]
 
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
 [env]
 MACOSX_DEPLOYMENT_TARGET = "10.15.7"
+RUSTC_WRAPPER = "sccache"
+
+[profile.release]
+incremental = true
+debug = false

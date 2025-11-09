@@ -662,8 +662,8 @@ fn main() {
             false,
             cx,
         );
-
-        repl::init(app_state.fs.clone(), cx);
+        agent_ui_v2::agents_panel::init(cx);
+        // repl::init(app_state.fs.clone(), cx);  // Temporarily disabled due to upstream dependency issue
         recent_projects::init(cx);
         dev_container::init(cx);
 
@@ -671,7 +671,7 @@ fn main() {
 
         editor::init(cx);
         image_viewer::init(cx);
-        repl::notebook::init(cx);
+        // repl::notebook::init(cx);  // Temporarily disabled due to upstream dependency issue
         diagnostics::init(cx);
 
         audio::init(cx);

@@ -36,6 +36,9 @@ pub const HOVER_POPOVER_GAP: Pixels = px(10.);
 
 /// Bindable action which uses the most recent selection head to trigger a hover
 pub fn hover(editor: &mut Editor, _: &Hover, window: &mut Window, cx: &mut Context<Editor>) {
+    if editor.mode().is_minimap() {
+        return;
+    }
     let head = editor.selections.newest_anchor().head();
     show_hover(editor, head, true, window, cx);
 }
@@ -48,6 +51,9 @@ pub fn hover_at(
     window: &mut Window,
     cx: &mut Context<Editor>,
 ) {
+    if editor.mode().is_minimap() {
+        return;
+    }
     if EditorSettings::get_global(cx).hover_popover_enabled {
         if show_keyboard_hover(editor, window, cx) {
             return;
@@ -128,6 +134,9 @@ pub fn hover_at_inlay(
     window: &mut Window,
     cx: &mut Context<Editor>,
 ) {
+    if editor.mode().is_minimap() {
+        return;
+    }
     if EditorSettings::get_global(cx).hover_popover_enabled {
         if editor.pending_rename.is_some() {
             return;
@@ -136,6 +145,10 @@ pub fn hover_at_inlay(
         let Some(project) = editor.project.clone() else {
             return;
         };
+
+        if editor.mode().is_minimap() {
+            return;
+        }
 
         if editor
             .hover_state

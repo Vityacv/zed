@@ -24,8 +24,8 @@ test-support = [
     "terminal_view/test-support",
     "image_viewer/test-support",
     "recent_projects/test-support",
-    "repl/test-support",
     "title_bar/test-support",
+    # "repl/test-support",
 ]
 visual-tests = [
     "gpui/test-support",
@@ -173,7 +173,7 @@ proto.workspace = true
 recent_projects.workspace = true
 release_channel.workspace = true
 remote.workspace = true
-repl.workspace = true
+# repl.workspace = true  # Temporarily disabled due to upstream dependency issue
 reqwest.workspace = true
 reqwest_client.workspace = true
 rope.workspace = true
@@ -189,6 +189,7 @@ sidebar.workspace = true
 smol.workspace = true
 snippet_provider.workspace = true
 snippets_ui.workspace = true
+ollama.workspace = true
 svg_preview.workspace = true
 sysinfo.workspace = true
 tab_switcher.workspace = true
@@ -263,7 +264,7 @@ workspace = { workspace = true, features = ["test-support"] }
 image.workspace = true
 agent_ui = { workspace = true, features = ["test-support"] }
 search = { workspace = true, features = ["test-support"] }
-repl = { workspace = true, features = ["test-support"] }
+# repl = { workspace = true, features = ["test-support"] }
 
 [package.metadata.bundle-dev]
 icon = ["resources/app-icon-dev@2x.png", "resources/app-icon-dev.png"]

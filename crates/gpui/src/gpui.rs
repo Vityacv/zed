@@ -38,6 +38,7 @@ pub mod profiler;
 #[cfg(any(target_os = "windows", target_os = "linux", target_family = "wasm"))]
 #[expect(missing_docs)]
 pub mod queue;
+mod render_prefs;
 mod scene;
 mod shared_string;
 mod shared_uri;

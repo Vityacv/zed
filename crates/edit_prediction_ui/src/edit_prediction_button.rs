@@ -767,7 +767,6 @@ impl EditPredictionButton {
                             }
                         }),
                 );
-
         menu = menu.separator().header("Privacy");
 
         if matches!(
