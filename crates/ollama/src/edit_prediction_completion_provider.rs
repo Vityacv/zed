@@ -1,10 +1,13 @@
 use std::{env, fmt::Write as _, sync::Arc, time::Duration};
 
 use anyhow::Result;
-use edit_prediction::{Direction, EditPrediction, EditPredictionProvider};
+use edit_prediction_types::{
+    EditPrediction, EditPredictionDelegate, EditPredictionDiscardReason, EditPredictionIconSet,
+};
 use futures::StreamExt;
 use gpui::{App, Context as GpuiContext, Entity, EntityId, Task};
 use http_client::HttpClient;
+use icons::IconName;
 use language::{language_settings::language_settings, Anchor, Buffer, ToOffset};
 use util::paths::PathStyle;
 
@@ -233,7 +236,7 @@ impl OllamaCompletionProvider {
     }
 }
 
-impl EditPredictionProvider for OllamaCompletionProvider {
+impl EditPredictionDelegate for OllamaCompletionProvider {
     fn name() -> &'static str {
         "ollama"
     }
@@ -242,12 +245,16 @@ impl EditPredictionProvider for OllamaCompletionProvider {
         "Ollama"
     }
 
-    fn show_completions_in_menu() -> bool {
+    fn show_predictions_in_menu() -> bool {
         true
     }
 
     fn show_tab_accept_marker() -> bool {
         true
+    }
+
+    fn icons(&self, _cx: &App) -> EditPredictionIconSet {
+        EditPredictionIconSet::new(IconName::AiOllama)
     }
 
     fn supports_jump_to_edit() -> bool {
@@ -258,7 +265,7 @@ impl EditPredictionProvider for OllamaCompletionProvider {
         self.model.is_some()
     }
 
-    fn is_refreshing(&self) -> bool {
+    fn is_refreshing(&self, _cx: &App) -> bool {
         self.pending_refresh.is_some()
     }
 
@@ -354,7 +361,8 @@ impl EditPredictionProvider for OllamaCompletionProvider {
 
                 this.prediction = Some(EditPrediction::Local {
                     id: None,
-                    edits: vec![(cursor_anchor..cursor_anchor, completion.clone())],
+                    edits: vec![(cursor_anchor..cursor_anchor, completion.clone().into())],
+                    cursor_position: None,
                     edit_preview: None,
                 });
                 this.buffer_id = Some(buffer_id);
@@ -367,20 +375,11 @@ impl EditPredictionProvider for OllamaCompletionProvider {
         }));
     }
 
-    fn cycle(
-        &mut self,
-        _buffer: Entity<Buffer>,
-        _cursor_position: Anchor,
-        _direction: Direction,
-        _cx: &mut GpuiContext<Self>,
-    ) {
-    }
-
     fn accept(&mut self, cx: &mut GpuiContext<Self>) {
         self.clear_prediction(cx);
     }
 
-    fn discard(&mut self, cx: &mut GpuiContext<Self>) {
+    fn discard(&mut self, _reason: EditPredictionDiscardReason, cx: &mut GpuiContext<Self>) {
         self.clear_prediction(cx);
     }
 

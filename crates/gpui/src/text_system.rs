@@ -50,7 +50,18 @@ pub enum GlyphKind {
     Ui,
 }
 
-pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
+/// Controls how antialiasing is applied to monochrome glyph masks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GlyphAntialiasingMode {
+    /// Keep the original grayscale mask untouched.
+    Default,
+    /// Convert the mask to hard black/white values.
+    Binary,
+    /// Quantize the mask to a limited number of grayscale levels.
+    Reduced,
+}
+
+pub const SUBPIXEL_VARIANTS_X: u8 = 4;
 
 /// Number of subpixel glyph variants along the Y axis.
 pub const SUBPIXEL_VARIANTS_Y: u8 = if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
@@ -811,15 +822,29 @@ impl TextRun {
 pub struct GlyphId(pub u32);
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RenderGlyphParams {
-    pub(crate) font_id: FontId,
-    pub(crate) glyph_id: GlyphId,
-    pub(crate) font_size: Pixels,
-    pub(crate) subpixel_variant: Point<u8>,
-    pub(crate) scale_factor: f32,
-    pub(crate) is_emoji: bool,
-    pub(crate) subpixel_rendering: bool,
-    pub(crate) glyph_kind: GlyphKind,
+pub struct RenderGlyphParams {
+    /// The selected font face in the text system.
+    pub font_id: FontId,
+    /// The glyph identifier inside the selected font.
+    pub glyph_id: GlyphId,
+    /// Font size in logical pixels.
+    pub font_size: Pixels,
+    /// Subpixel placement variant used for glyph caching and rasterization.
+    pub subpixel_variant: Point<u8>,
+    /// Window scale factor used for device-space rasterization.
+    pub scale_factor: f32,
+    /// Whether this glyph is emoji and should use color glyph sources.
+    pub is_emoji: bool,
+    /// Whether subpixel color rendering is enabled for this glyph.
+    pub subpixel_rendering: bool,
+    /// Whether this glyph belongs to the editor buffer text or to UI text.
+    pub glyph_kind: GlyphKind,
+    /// Antialiasing mode for monochrome glyph masks.
+    pub antialiasing_mode: GlyphAntialiasingMode,
+    /// Binary threshold used when `antialiasing_mode` is `Binary`.
+    pub binary_threshold: u8,
+    /// Number of quantization levels used when `antialiasing_mode` is `Reduced`.
+    pub reduced_levels: u8,
 }
 
 impl Eq for RenderGlyphParams {}
@@ -834,6 +859,9 @@ impl Hash for RenderGlyphParams {
         self.is_emoji.hash(state);
         self.subpixel_rendering.hash(state);
         self.glyph_kind.hash(state);
+        self.antialiasing_mode.hash(state);
+        self.binary_threshold.hash(state);
+        self.reduced_levels.hash(state);
     }
 }
 

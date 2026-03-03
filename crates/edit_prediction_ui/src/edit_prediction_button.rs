@@ -728,7 +728,15 @@ impl EditPredictionButton {
         let subtle_mode = matches!(current_mode, EditPredictionsMode::Subtle);
         let eager_mode = matches!(current_mode, EditPredictionsMode::Eager);
 
-        menu = menu
+        if matches!(
+            provider,
+            EditPredictionProvider::Zed
+                | EditPredictionProvider::Copilot
+                | EditPredictionProvider::Codestral
+                | EditPredictionProvider::Ollama
+                | EditPredictionProvider::Experimental(_)
+        ) {
+            menu = menu
                 .separator()
                 .header("Display Modes")
                 .item(
@@ -767,6 +775,7 @@ impl EditPredictionButton {
                             }
                         }),
                 );
+        }
         menu = menu.separator().header("Privacy");
 
         if matches!(

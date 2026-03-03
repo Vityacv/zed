@@ -17,7 +17,7 @@ use crate::{
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextRenderingMode, TextStyle,
     TextStyleRefinement, ThermalState, TransformationMatrix, Underline, UnderlineStyle,
     WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControls, WindowDecorations,
-    WindowOptions, WindowParams, WindowTextSystem, point, prelude::*, px, rems, size,
+    WindowOptions, WindowParams, WindowTextSystem, GlyphAntialiasingMode, point, prelude::*, px, rems, size,
     transparent_black,
 };
 use anyhow::{Context as _, Result, anyhow};
@@ -3246,6 +3246,11 @@ impl Window {
             GlyphKind::Buffer => crate::render_prefs::buffer_antialiasing(),
             GlyphKind::Ui => crate::render_prefs::ui_antialiasing(),
         };
+        let antialiasing_mode = match profile.mode {
+            crate::render_prefs::AntialiasingMode::Default => GlyphAntialiasingMode::Default,
+            crate::render_prefs::AntialiasingMode::Binary => GlyphAntialiasingMode::Binary,
+            crate::render_prefs::AntialiasingMode::Reduced => GlyphAntialiasingMode::Reduced,
+        };
 
         let mut subpixel_variant = Point {
             x: (glyph_origin.x.0.fract() * SUBPIXEL_VARIANTS_X as f32).floor() as u8,
@@ -3264,6 +3269,9 @@ impl Window {
             is_emoji: false,
             subpixel_rendering,
             glyph_kind,
+            antialiasing_mode,
+            binary_threshold: profile.binary_threshold,
+            reduced_levels: profile.reduced_levels,
         };
 
         let raster_bounds = self.text_system().raster_bounds(&params)?;
@@ -3345,6 +3353,15 @@ impl Window {
 
         let scale_factor = self.scale_factor();
         let glyph_origin = origin.scale(scale_factor);
+        let profile = match glyph_kind {
+            GlyphKind::Buffer => crate::render_prefs::buffer_antialiasing(),
+            GlyphKind::Ui => crate::render_prefs::ui_antialiasing(),
+        };
+        let antialiasing_mode = match profile.mode {
+            crate::render_prefs::AntialiasingMode::Default => GlyphAntialiasingMode::Default,
+            crate::render_prefs::AntialiasingMode::Binary => GlyphAntialiasingMode::Binary,
+            crate::render_prefs::AntialiasingMode::Reduced => GlyphAntialiasingMode::Reduced,
+        };
         let params = RenderGlyphParams {
             font_id,
             glyph_id,
@@ -3355,6 +3372,9 @@ impl Window {
             is_emoji: true,
             subpixel_rendering: false,
             glyph_kind,
+            antialiasing_mode,
+            binary_threshold: profile.binary_threshold,
+            reduced_levels: profile.reduced_levels,
         };
 
         let raster_bounds = self.text_system().raster_bounds(&params)?;

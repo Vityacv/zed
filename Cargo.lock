@@ -11611,9 +11611,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "edit_prediction",
+ "edit_prediction_types",
  "futures 0.3.32",
  "gpui",
  "http_client",
+ "icons",
  "language",
  "project",
  "schemars",

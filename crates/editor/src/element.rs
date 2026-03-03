@@ -9175,8 +9175,8 @@ impl LineWithInvisibles {
                     line.paint_with_kind(
                         fragment_origin,
                         line_height,
-                        TextAlign::Left,
-                        None,
+                        layout.text_align,
+                        Some(layout.content_width),
                         GlyphKind::Buffer,
                         window,
                         cx,

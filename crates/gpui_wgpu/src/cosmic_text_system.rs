@@ -6,8 +6,9 @@ use cosmic_text::{
 };
 use gpui::{
     Bounds, DevicePixels, Font, FontFeatures, FontId, FontMetrics, FontRun, GlyphId, LineLayout,
-    Pixels, PlatformTextSystem, RenderGlyphParams, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y,
-    ShapedGlyph, ShapedRun, SharedString, Size, TextRenderingMode, point, size,
+    GlyphAntialiasingMode, Pixels, PlatformTextSystem, RenderGlyphParams, SUBPIXEL_VARIANTS_X,
+    SUBPIXEL_VARIANTS_Y, ShapedGlyph, ShapedRun, SharedString, Size, TextRenderingMode, point,
+    size,
 };
 
 use itertools::Itertools;
@@ -302,7 +303,15 @@ impl CosmicTextSystemState {
                 }
                 Ok((bitmap_size, image.data))
             }
-            swash::scale::image::Content::Mask => Ok((bitmap_size, image.data)),
+            swash::scale::image::Content::Mask => {
+                apply_antialiasing_mode_to_mask(
+                    &mut image.data,
+                    params.antialiasing_mode,
+                    params.binary_threshold,
+                    params.reduced_levels,
+                );
+                Ok((bitmap_size, image.data))
+            }
         }
     }
 
@@ -508,6 +517,30 @@ impl CosmicTextSystemState {
             descent: layout.max_descent.into(),
             runs,
             len: text.len(),
+        }
+    }
+}
+
+fn apply_antialiasing_mode_to_mask(
+    alpha_mask: &mut [u8],
+    antialiasing_mode: GlyphAntialiasingMode,
+    binary_threshold: u8,
+    reduced_levels: u8,
+) {
+    match antialiasing_mode {
+        GlyphAntialiasingMode::Default => {}
+        GlyphAntialiasingMode::Binary => {
+            for value in alpha_mask {
+                *value = if *value >= binary_threshold { u8::MAX } else { 0 };
+            }
+        }
+        GlyphAntialiasingMode::Reduced => {
+            let clamped_levels = reduced_levels.clamp(2, 8);
+            let step_count = u16::from(clamped_levels - 1);
+            for value in alpha_mask {
+                let quantized_level = (u16::from(*value) * step_count + 127) / 255;
+                *value = (quantized_level * 255 / step_count) as u8;
+            }
         }
     }
 }
